@@ -6,6 +6,7 @@ import { useResource } from './hooks/useResource';
 import { Icon } from './components/Icon';
 import { ClientPanel, ReadState, RoleBadge } from './components/ClientPanel';
 import { UploadDialog } from './components/UploadDialog';
+import { AssistantPanel } from './components/AssistantPanel';
 import { roleLabels } from './utils/roles';
 import { formatDate, formatInteger, formatMoney } from './utils/format';
 import { isValidGid } from './utils/gid';
@@ -82,7 +83,15 @@ function Exports({ runId }: { runId: string }) {
     </details>
   );
 }
-function RunWorkspace({ runId }: { runId: string }) {
+function RunWorkspace({
+  runId,
+  assistantOpen,
+  onAssistantClose,
+}: {
+  runId: string;
+  assistantOpen: boolean;
+  onAssistantClose: () => void;
+}) {
   const run = useResource(runId, (signal) => http.run(runId, signal));
   const [state, dispatch] = useReducer(reviewReducer, initialReviewState);
   const { filters, offset, picked, search, searchError, searching, notice } =
@@ -440,6 +449,13 @@ function RunWorkspace({ runId }: { runId: string }) {
           </article>
         )}
       </main>
+      <AssistantPanel
+        runId={runId}
+        selectedGid={gid || null}
+        open={assistantOpen}
+        onClose={onAssistantClose}
+        onSelect={select}
+      />
       <footer className="workspace-footer">
         <span>
           Роли и приоритет помогают выбрать, что проверить. Они не подтверждают
@@ -454,6 +470,7 @@ export default function App() {
   const runs = useResource('runs', (signal) => http.runs(signal));
   const [chosen, setChosen] = useState('');
   const [upload, setUpload] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [announcement, setAnnouncement] = useState('');
   const completed = [...(runs.data?.items ?? [])]
     .filter((run) => run.status === 'completed')
@@ -463,7 +480,7 @@ export default function App() {
   );
   const runId = chosen || completed[0]?.run_id || '';
   return (
-    <div className="app-shell">
+    <div className={`app-shell${assistantOpen && runId ? ' chat-open' : ''}`}>
       <a href="#workspace" className="skip-link">
         Перейти к анализу
       </a>
@@ -496,6 +513,17 @@ export default function App() {
               </select>
             </label>
           )}
+          {runId && (
+            <button
+              className="button assistant-toggle"
+              aria-expanded={assistantOpen}
+              aria-controls="ai-analyst"
+              onClick={() => setAssistantOpen((value) => !value)}
+            >
+              <Icon name="sparkles" size={17} />
+              ИИ-аналитик
+            </button>
+          )}
           {runId && <Exports key={runId} runId={runId} />}
           <button
             className="button button-primary"
@@ -522,7 +550,12 @@ export default function App() {
         </div>
       )}
       {runId ? (
-        <RunWorkspace key={runId} runId={runId} />
+        <RunWorkspace
+          key={runId}
+          runId={runId}
+          assistantOpen={assistantOpen}
+          onAssistantClose={() => setAssistantOpen(false)}
+        />
       ) : runs.loading || runs.error ? (
         <ReadState
           error={runs.error}
