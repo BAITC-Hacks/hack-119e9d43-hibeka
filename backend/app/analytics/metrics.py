@@ -1,4 +1,4 @@
-"""Basic client metrics from the observed directed transfer graph."""
+"""Client metrics and centrality from the observed directed transfer graph."""
 
 from pathlib import Path
 
@@ -8,6 +8,10 @@ from pydantic import BaseModel, Field
 from backend.app.analytics.graph import build_graph
 from backend.app.data import DATA_DIR, ValidationInfo, load_dataset
 from backend.app.validation import _to_tiyn
+
+
+class CentralityError(Exception):
+    """Centrality calculation could not produce a converged result."""
 
 
 class ClientMetrics(BaseModel):
@@ -22,6 +26,8 @@ class ClientMetrics(BaseModel):
     in_kzt: float = Field(ge=0, allow_inf_nan=False)
     out_kzt: float = Field(ge=0, allow_inf_nan=False)
     net_flow_kzt: float = Field(allow_inf_nan=False)
+    pagerank: float = Field(ge=0, allow_inf_nan=False)
+    betweenness: float = Field(ge=0, allow_inf_nan=False)
 
 
 class ClientMetricsPage(BaseModel):
@@ -34,6 +40,20 @@ class ClientMetricsPage(BaseModel):
 
 def calculate_client_metrics(graph: nx.DiGraph) -> list[ClientMetrics]:
     """Count each directed edge once per endpoint, keeping isolated clients."""
+    # Calculate on the complete graph, before pagination, including isolates.
+    try:
+        pagerank = nx.pagerank(
+            graph, alpha=0.85, personalization=None, max_iter=1000,
+            tol=1e-8, weight="sum_kzt", dangling=None,
+        )
+    except nx.PowerIterationFailedConvergence as exc:
+        raise CentralityError(
+            "PageRank не сошёлся за 1000 итераций. Показатели не рассчитаны."
+        ) from exc
+    # Transfer amounts are not path lengths; use exact unweighted paths.
+    betweenness = nx.betweenness_centrality(
+        graph, k=None, normalized=True, weight=None, endpoints=False,
+    )
     totals = {
         gid: {"in_tiyn": 0, "out_tiyn": 0, "in_tx": 0, "out_tx": 0}
         for gid in graph.nodes
@@ -65,6 +85,8 @@ def calculate_client_metrics(graph: nx.DiGraph) -> list[ClientMetrics]:
             in_kzt=values["in_tiyn"] / 100,
             out_kzt=values["out_tiyn"] / 100,
             net_flow_kzt=(values["in_tiyn"] - values["out_tiyn"]) / 100,
+            pagerank=pagerank[gid],
+            betweenness=betweenness[gid],
         ))
     return result
 

@@ -3,7 +3,7 @@
 from fastapi import FastAPI, HTTPException, Query
 
 from backend.app.analytics.graph import GraphSummary, load_graph_summary
-from backend.app.analytics.metrics import ClientMetricsPage, load_client_metrics
+from backend.app.analytics.metrics import CentralityError, ClientMetricsPage, load_client_metrics
 from backend.app.data import DataSummary, DatasetError, load_summary
 
 app = FastAPI(title="Money Graph API", version="0.1.0")
@@ -37,5 +37,5 @@ def client_metrics(
 ) -> ClientMetricsPage:
     try:
         return load_client_metrics(offset=offset, limit=limit)
-    except DatasetError as exc:
+    except (DatasetError, CentralityError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
