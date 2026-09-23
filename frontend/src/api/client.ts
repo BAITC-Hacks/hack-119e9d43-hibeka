@@ -6,6 +6,8 @@ import type {
   Cluster,
 } from '../types/api';
 
+export const REVIEW_PAGE_SIZE = 30;
+
 // The HTTP contract is independent of the original, optional preview fixtures.
 export interface AnalysisRun {
   run_id: string;
@@ -76,11 +78,10 @@ export interface Filters {
 }
 
 export class ApiFailure extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
+  status: number;
+  constructor(status: number, message: string) {
     super(message);
+    this.status = status;
   }
 }
 function errorMessage(body: unknown): string | undefined {
@@ -120,7 +121,13 @@ async function request<T>(
       errorMessage(data) ?? `Не удалось получить данные (${response.status}).`,
     );
   }
-  return response.json() as Promise<T>;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error(
+      'Сервер вернул некорректный ответ. Проверьте, что API запущен и адрес /api направлен на бэкенд.',
+    );
+  }
 }
 export const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'Не удалось выполнить запрос.';
@@ -141,7 +148,10 @@ export const http = {
     filters: Filters,
     signal?: AbortSignal,
   ) => {
-    const params = new URLSearchParams({ offset: String(offset), limit: '30' });
+    const params = new URLSearchParams({
+      offset: String(offset),
+      limit: String(REVIEW_PAGE_SIZE),
+    });
     if (filters.role) params.set('role', filters.role);
     if (filters.cluster) params.set('cluster_id', filters.cluster);
     if (filters.seed) params.set('is_seed', 'true');

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiFailure, http, messageOf } from './api/client';
+import { ApiFailure, http, messageOf, REVIEW_PAGE_SIZE } from './api/client';
 import type { AnalysisRun, Filters } from './api/client';
 import { useResource } from './hooks/useResource';
 import { Icon } from './components/Icon';
@@ -9,13 +9,14 @@ import { UploadDialog } from './components/UploadDialog';
 import { AssistantPanel } from './components/AssistantPanel';
 import { roleLabels } from './utils/roles';
 import { formatDate, formatInteger, formatMoney } from './utils/format';
-
-const emptyFilters: Filters = {
-  role: '',
-  cluster: '',
-  seed: false,
-  boundary: false,
-};
+import { isValidGid } from './utils/gid';
+import { RequestGate } from './state/requestGate';
+import {
+  emptyFilters,
+  initialReviewState,
+  reviewQueryKey,
+  reviewReducer,
+} from './state/review';
 function runLabel(run: AnalysisRun) {
   return new Intl.DateTimeFormat('ru-RU', {
     day: 'numeric',
@@ -92,62 +93,76 @@ function RunWorkspace({
   onAssistantClose: () => void;
 }) {
   const run = useResource(runId, (signal) => http.run(runId, signal));
-  const [filters, setFilters] = useState<Filters>(emptyFilters);
-  const [offset, setOffset] = useState(0);
-  const [picked, setPicked] = useState('');
-  const [search, setSearch] = useState('');
-  const [searchError, setSearchError] = useState('');
-  const [searching, setSearching] = useState(false);
-  const searchController = useRef<AbortController | null>(null);
-  const page = useResource(
-    `${runId}/${offset}/${JSON.stringify(filters)}`,
-    (signal) => http.nodes(runId, offset, filters, signal),
-  );
+  const [state, dispatch] = useReducer(reviewReducer, initialReviewState);
+  const { filters, offset, picked, search, searchError, searching, notice } =
+    state;
+  const searchGate = useRef(new RequestGate());
+  const queryKey = reviewQueryKey(state);
+  const page = useResource(`${runId}/${queryKey}`, async (signal) => {
+    const data = await http.nodes(runId, offset, filters, signal);
+    if (!signal.aborted)
+      dispatch({ type: 'page-loaded', key: queryKey, page: data });
+    return data;
+  });
   const clusters = useResource(`${runId}/clusters`, (signal) =>
     http.clusters(runId, signal),
   );
-  const gid = picked || page.data?.items[0]?.gid || '';
+  const gid = picked;
   const activeFilters = Object.values(filters).filter(Boolean).length;
   const selectedOnPage = page.data?.items.some((node) => node.gid === gid);
-  useEffect(() => () => searchController.current?.abort(), []);
+  useEffect(() => {
+    const gate = searchGate.current;
+    return () => gate.cancel();
+  }, []);
   function select(gid: string) {
-    searchController.current?.abort();
-    setSearching(false);
-    setSearchError('');
-    setPicked(gid);
+    searchGate.current.cancel();
+    dispatch({ type: 'select', gid });
   }
   function filter(next: Partial<Filters>) {
-    setFilters((current) => ({ ...current, ...next }));
-    setOffset(0);
-    setPicked('');
-    searchController.current?.abort();
-    setSearching(false);
-    setSearchError('');
+    searchGate.current.cancel();
+    dispatch({ type: 'filters', filters: next });
+  }
+  function editSearch(value: string) {
+    searchGate.current.cancel();
+    dispatch({ type: 'edit-search', value });
+  }
+  function changePage(offset: number) {
+    searchGate.current.cancel();
+    dispatch({ type: 'page', offset });
   }
   async function find(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (searching) return;
     const value = search.trim();
-    if (!/^\d+$/.test(value)) {
-      setSearchError('Введите полный числовой идентификатор клиента.');
+    if (!value) {
+      editSearch('');
       return;
     }
-    searchController.current?.abort();
-    const controller = new AbortController();
-    searchController.current = controller;
-    setSearching(true);
-    setSearchError('');
+    if (!isValidGid(value)) {
+      dispatch({
+        type: 'search-error',
+        version: state.searchVersion,
+        message:
+          'Введите полный идентификатор: от 1 до 19 цифр, без пробелов внутри.',
+      });
+      return;
+    }
+    const task = searchGate.current.start();
+    const version = state.searchVersion;
+    dispatch({ type: 'search-start', value });
     try {
-      await http.node(runId, value, controller.signal);
-      if (!controller.signal.aborted) setPicked(value);
+      const node = await http.node(runId, value, task.signal);
+      if (task.isCurrent()) dispatch({ type: 'search-found', version, node });
     } catch (failure) {
-      if (!controller.signal.aborted)
-        setSearchError(
-          failure instanceof ApiFailure && failure.status === 404
-            ? 'Клиент не найден в этом анализе. Проверьте полный идентификатор.'
-            : messageOf(failure),
-        );
-    } finally {
-      if (!controller.signal.aborted) setSearching(false);
+      if (task.isCurrent())
+        dispatch({
+          type: 'search-error',
+          version,
+          message:
+            failure instanceof ApiFailure && failure.status === 404
+              ? 'Клиент не найден в этом анализе. Проверьте полный идентификатор.'
+              : messageOf(failure),
+        });
     }
   }
   const summary = run.data?.summary;
@@ -202,24 +217,39 @@ function RunWorkspace({
             <input
               id="client-search"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => editSearch(event.target.value)}
+              aria-invalid={!!searchError}
+              aria-describedby="client-search-feedback"
               placeholder="Найти по полному ID"
               inputMode="numeric"
               autoComplete="off"
             />
             <button
               type="submit"
-              disabled={searching}
+              disabled={searching || !search.trim()}
               aria-label="Найти клиента"
             >
               {searching ? '…' : '↵'}
             </button>
+            <button
+              type="button"
+              aria-label="Очистить поиск"
+              title="Очистить поиск"
+              disabled={!search}
+              onClick={() => editSearch('')}
+            >
+              ×
+            </button>
           </form>
-          {searchError && (
-            <p className="error-text search-error" role="alert">
-              {searchError}
-            </p>
-          )}
+          <p
+            id="client-search-feedback"
+            className={
+              searchError ? 'error-text search-error' : 'search-feedback'
+            }
+            role="status"
+          >
+            {searchError || (searching ? 'Ищем клиента…' : notice)}
+          </p>
           <details className="filter-disclosure">
             <summary>
               <span>
@@ -232,6 +262,7 @@ function RunWorkspace({
               <label>
                 Роль
                 <select
+                  aria-label="Роль"
                   value={filters.role}
                   onChange={(event) => filter({ role: event.target.value })}
                 >
@@ -246,6 +277,7 @@ function RunWorkspace({
               <label>
                 Группа
                 <select
+                  aria-label="Группа"
                   value={filters.cluster}
                   onChange={(event) => filter({ cluster: event.target.value })}
                 >
@@ -337,10 +369,7 @@ function RunWorkspace({
                 className="page-button"
                 disabled={offset === 0}
                 aria-label="Предыдущие клиенты"
-                onClick={() => {
-                  setOffset(Math.max(0, offset - 30));
-                  select('');
-                }}
+                onClick={() => changePage(offset - REVIEW_PAGE_SIZE)}
               >
                 ←
               </button>
@@ -352,10 +381,7 @@ function RunWorkspace({
                 className="page-button"
                 disabled={offset + page.data.items.length >= page.data.total}
                 aria-label="Следующие клиенты"
-                onClick={() => {
-                  setOffset(offset + 30);
-                  select('');
-                }}
+                onClick={() => changePage(offset + REVIEW_PAGE_SIZE)}
               >
                 →
               </button>

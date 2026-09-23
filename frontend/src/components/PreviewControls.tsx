@@ -43,6 +43,9 @@ export function PreviewControls({
             <option value="loading">Загрузка</option>
             <option value="empty">Нет данных</option>
             <option value="error">Ошибка</option>
+            <option value="queue-error">Ошибка очереди</option>
+            <option value="card-error">Ошибка карточки</option>
+            <option value="partial">Неполная карточка</option>
           </select>
           <button
             className="icon-button"

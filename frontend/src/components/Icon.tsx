@@ -8,10 +8,12 @@ type IconName =
   | 'client'
   | 'layers'
   | 'refresh'
+  | 'copy'
   | 'alert';
 const paths: Record<IconName, string> = {
   sparkles:
     'M12 3l2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6L12 3ZM21 2v4m-2-2h4',
+  copy: 'M8 8h12v13H8V8ZM16 8V3H3v13h5',
   network:
     'M8 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM22 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM14 19a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM8 6l8 2M6 8l4 8M17 11l-4 5',
   upload: 'M12 16V3m-5 5 5-5 5 5M4 15v5h16v-5',
