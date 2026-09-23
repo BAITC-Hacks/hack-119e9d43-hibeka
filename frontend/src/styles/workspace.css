@@ -172,6 +172,7 @@
 }
 .search-form input {
   width: 100%;
+  min-width: 0;
   border: 0;
   padding: 7px 0;
   font-size: 12px;
@@ -179,6 +180,7 @@
   background: transparent;
 }
 .search-form button {
+  flex-shrink: 0;
   margin-right: 5px;
   width: 29px;
   min-height: 28px;
@@ -187,6 +189,11 @@
 }
 .search-error {
   padding: 0 20px 10px;
+}
+.search-feedback:not(:empty) {
+  padding: 0 20px 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 .filter-disclosure {
   margin: 0 20px;

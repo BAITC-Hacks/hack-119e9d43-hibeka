@@ -1,19 +1,15 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense } from 'react';
 import { http } from '../api/client';
 import type { AnalysisNode, AnalysisDetail } from '../api/client';
 import type { Counterparty } from '../types/api';
 import { useResource } from '../hooks/useResource';
 import { roleLabels } from '../utils/roles';
-import {
-  formatDate,
-  formatInteger,
-  formatMoney,
-  formatScore,
-} from '../utils/format';
+import { formatDate, formatMoney, formatScore } from '../utils/format';
 const LocalGraph = lazy(() =>
   import('./LocalGraph').then((module) => ({ default: module.LocalGraph })),
 );
 import { Icon } from './Icon';
+import { CopyGidButton } from './CopyGidButton';
 
 export function RoleBadge({ node }: { node: AnalysisNode }) {
   return (
@@ -74,7 +70,7 @@ function Counterparties({
             <thead>
               <tr>
                 <th>Клиент</th>
-                <th>Сумма, KZT</th>
+                <th>Сумма</th>
                 <th>Переводов</th>
               </tr>
             </thead>
@@ -91,7 +87,7 @@ function Counterparties({
                         {row.gid}
                       </button>
                     </td>
-                    <td>{formatInteger(row.sum_kzt)}</td>
+                    <td>{formatMoney(row.sum_kzt)}</td>
                     <td>{row.n_tx}</td>
                   </tr>
                 ))}
@@ -138,8 +134,6 @@ function Details({
   node: AnalysisDetail;
   onSelect: (gid: string) => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState('');
   const graph = useResource(`${node.run_id}/${node.gid}/graph`, (signal) =>
     http.graph(node.run_id, node.gid, signal),
   );
@@ -153,26 +147,7 @@ function Details({
           <span className="eyebrow">ВЫБРАННЫЙ КЛИЕНТ</span>
           <div className="client-id">
             <h2>{node.gid}</h2>
-            <button
-              className="copy-button"
-              title="Скопировать идентификатор"
-              aria-label="Скопировать идентификатор клиента"
-              onClick={() => {
-                void navigator.clipboard
-                  .writeText(node.gid)
-                  .then(() => {
-                    setCopied(true);
-                    setCopyError('');
-                  })
-                  .catch(() =>
-                    setCopyError(
-                      'Не удалось скопировать. Выделите идентификатор вручную.',
-                    ),
-                  );
-              }}
-            >
-              {copied ? '✓' : '⧉'}
-            </button>
+            <CopyGidButton gid={node.gid} />
           </div>
         </div>
         <div className="priority-heading">
@@ -180,11 +155,6 @@ function Details({
           <span>в очереди проверки</span>
         </div>
       </div>
-      {copyError && (
-        <p className="notice" role="status">
-          {copyError}
-        </p>
-      )}
       <div className="client-badges">
         <span className="role-caption">Предполагаемая роль</span>
         <RoleBadge node={node} />

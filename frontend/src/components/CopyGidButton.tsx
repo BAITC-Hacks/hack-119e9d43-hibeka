@@ -4,6 +4,10 @@ import { isValidGid } from '../utils/gid';
 import { Icon } from './Icon';
 
 export function CopyGidButton({ gid }: { gid: string }) {
+  return <CopyGidAction key={gid} gid={gid} />;
+}
+
+function CopyGidAction({ gid }: { gid: string }) {
   const [status, setStatus] = useState<{
     pending: boolean;
     message: string;
