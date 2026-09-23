@@ -5,6 +5,8 @@ from pathlib import Path
 import networkx as nx
 from pydantic import BaseModel, Field
 
+from backend.app.analytics.clusters import ClusterResult, calculate_clusters
+from backend.app.analytics.config import AnalysisConfig
 from backend.app.analytics.graph import build_graph
 from backend.app.data import DATA_DIR, ValidationInfo, load_dataset
 from backend.app.validation import _to_tiyn
@@ -16,6 +18,7 @@ class CentralityError(Exception):
 
 class ClientMetrics(BaseModel):
     gid: str
+    cluster_id: int = Field(ge=0)
     depth: int
     is_seed: bool
     is_isolated: bool
@@ -38,17 +41,20 @@ class ClientMetricsPage(BaseModel):
     validation: ValidationInfo
 
 
-def calculate_client_metrics(graph: nx.DiGraph) -> list[ClientMetrics]:
+def calculate_client_metrics(graph: nx.DiGraph, *, clusters: ClusterResult | None = None,
+                             config: AnalysisConfig | None = None) -> list[ClientMetrics]:
     """Count each directed edge once per endpoint, keeping isolated clients."""
+    config = config or AnalysisConfig()
+    clusters = clusters or calculate_clusters(graph, config)
     # Calculate on the complete graph, before pagination, including isolates.
     try:
         pagerank = nx.pagerank(
-            graph, alpha=0.85, personalization=None, max_iter=1000,
-            tol=1e-8, weight="sum_kzt", dangling=None,
+            graph, alpha=config.pagerank_alpha, personalization=None, max_iter=config.pagerank_max_iter,
+            tol=config.pagerank_tol, weight="sum_kzt", dangling=None,
         )
     except nx.PowerIterationFailedConvergence as exc:
         raise CentralityError(
-            "PageRank не сошёлся за 1000 итераций. Показатели не рассчитаны."
+            f"PageRank не сошёлся за {config.pagerank_max_iter} итераций. Показатели не рассчитаны."
         ) from exc
     # Transfer amounts are not path lengths; use exact unweighted paths.
     betweenness = nx.betweenness_centrality(
@@ -75,6 +81,7 @@ def calculate_client_metrics(graph: nx.DiGraph) -> list[ClientMetrics]:
         out_deg = graph.out_degree(gid)
         result.append(ClientMetrics(
             gid=str(gid),
+            cluster_id=clusters.assignments[gid],
             depth=attributes["depth"],
             is_seed=attributes["is_seed"],
             is_isolated=in_deg == 0 and out_deg == 0,

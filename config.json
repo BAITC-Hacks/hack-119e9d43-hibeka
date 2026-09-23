@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "role_version": "1.1",
+  "ranking_version": "1.1",
+  "boundary_depth": 4,
+  "pagerank_alpha": 0.85,
+  "pagerank_max_iter": 1000,
+  "pagerank_tol": 1e-8,
+  "louvain_resolution": 1.0,
+  "random_seed": 42,
+  "top_n": 50,
+  "roles": {
+    "consolidator_min_in": 3,
+    "consolidator_scale_in": 8,
+    "consolidator_weights": [
+      0.45,
+      0.25,
+      0.2,
+      0.1
+    ],
+    "consolidator_q": 0.9,
+    "consolidator_boundary_q": 0.6,
+    "distributor_min_out": 10,
+    "distributor_scale_out": 20,
+    "distributor_weights": [
+      0.5,
+      0.3,
+      0.2
+    ],
+    "distributor_q": 0.9,
+    "transit_min_ratio": 0.8,
+    "transit_max_ratio": 1.2,
+    "transit_balance_width": 0.2,
+    "transit_scale_tx": 3,
+    "transit_scale_kzt": 100000.0,
+    "transit_weights": [
+      0.6,
+      0.2,
+      0.2
+    ],
+    "transit_q": 0.75,
+    "terminal_base": 0.6,
+    "terminal_days_weight": 0.4,
+    "terminal_observation_days": 7,
+    "terminal_q": 0.65,
+    "coordinator_quantile": 0.95,
+    "coordinator_min_clusters": 2,
+    "coordinator_scale_clusters": 3,
+    "coordinator_weights": [
+      0.5,
+      0.3,
+      0.2
+    ],
+    "coordinator_q": 0.8,
+    "seed_scale": 3
+  },
+  "ranking": {
+    "betweenness": 0.3,
+    "pagerank": 0.2,
+    "activity_kzt": 0.2,
+    "n_seed_upstream": 0.15,
+    "neighbor_count": 0.15
+  }
+}
