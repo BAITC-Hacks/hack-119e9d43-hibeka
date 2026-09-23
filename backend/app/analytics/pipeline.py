@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 from time import perf_counter
 from uuid import uuid4
@@ -27,6 +28,30 @@ CSV_FIELDS = {
     "top_nodes.csv": ["rank", "gid", "role", "priority_score", "why"],
 }
 INPUT_FILES = ("nodes.parquet", "edges.parquet", "transactions.parquet")
+
+
+def reserve_run(out_dir: Path, run_id: str):
+    """Reserve the same slot for CLI, upload and worker processes."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    lock = out_dir / ".analysis.lock"
+    try:
+        lock.mkdir()
+    except FileExistsError as exc:
+        raise ValueError("В этой папке результатов уже выполняется расчёт") from exc
+    try:
+        write_json(lock / "owner.json", {"run_id": run_id, "pid": os.getpid()})
+    except BaseException:
+        (lock / "owner.json").unlink(missing_ok=True)
+        lock.rmdir()
+        raise
+
+
+def release_run(out_dir: Path, run_id: str):
+    lock = out_dir / ".analysis.lock"
+    owner = lock / "owner.json"
+    if owner.is_file() and json.loads(owner.read_text())["run_id"] == run_id:
+        owner.unlink()
+        lock.rmdir()
 
 
 def write_json(path, value):
@@ -87,26 +112,37 @@ def write_csvs(directory, rows, clusters, top_n):
             raise ValueError(f"Неполный CSV {name}")
 
 
-def run_analysis(data_dir: Path, out_dir: Path, config: AnalysisConfig) -> dict:
+def run_analysis(data_dir: Path, out_dir: Path, config: AnalysisConfig, *,
+                 run_id: str | None = None, reserved: bool = False, progress=None) -> dict:
     start = perf_counter()
     out_dir = out_dir.resolve()
     data_dir = data_dir.resolve()
     if out_dir == data_dir or data_dir in out_dir.parents:
         raise ValueError("Папка результатов должна находиться вне входной папки")
     out_dir.mkdir(parents=True, exist_ok=True)
-    lock = out_dir / ".analysis.lock"
-    try:
-        lock.mkdir()
-    except FileExistsError as exc:
-        raise ValueError("В этой папке результатов уже выполняется расчёт") from exc
-    run_id = uuid4().hex
+    run_id = run_id or uuid4().hex
+    if not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        raise ValueError("Некорректный run_id")
+    if (out_dir / "runs" / run_id).exists():
+        raise ValueError("Такой запуск уже существует")
+    if reserved:
+        owner = out_dir / ".analysis.lock" / "owner.json"
+        if not owner.is_file() or json.loads(owner.read_text())["run_id"] != run_id:
+            raise ValueError("Запуск не владеет слотом расчёта")
+    else:
+        reserve_run(out_dir, run_id)
+    def stage_changed(name):
+        if progress is not None:
+            progress(name)
     runs = out_dir / "runs"
     stage = runs / (".pending-" + run_id)
     destination = runs / run_id
+    published = False
     report = dict(run_id=run_id, created_at=datetime.now(timezone.utc).isoformat(), status="running",
                   schema_version=config.schema_version, role_version=config.role_version,
                   ranking_version=config.ranking_version, config=config.model_dump(), stages_seconds={})
     try:
+        stage_changed("copying_inputs")
         for name in CSV_FIELDS:
             target = out_dir / name
             if (target.exists() or target.is_symlink()) and not (
@@ -129,17 +165,21 @@ def run_analysis(data_dir: Path, out_dir: Path, config: AnalysisConfig) -> dict:
         report["input_sha256"] = hashes
         config_bytes = json.dumps(config.model_dump(), sort_keys=True).encode()
         report["config_sha256"] = hashlib.sha256(config_bytes).hexdigest()
+        stage_changed("validation")
         checkpoint = perf_counter()
         dataset = load_dataset(inputs)
         report["stages_seconds"]["validation"] = perf_counter() - checkpoint
         checkpoint = perf_counter()
+        stage_changed("graph_and_clusters")
         graph = build_graph(dataset)
         clusters = calculate_clusters(graph, config)
         report["stages_seconds"]["graph_and_clusters"] = perf_counter() - checkpoint
         checkpoint = perf_counter()
+        stage_changed("features")
         features = calculate_features(graph, dataset, clusters, config)
         report["stages_seconds"]["features"] = perf_counter() - checkpoint
         checkpoint = perf_counter()
+        stage_changed("roles_and_ranking")
         ranked = score_features(features, config)
         cluster_rows = complete_clusters(clusters, ranked)
         validate_result(ranked, cluster_rows, {str(gid) for gid in graph})
@@ -159,6 +199,7 @@ def run_analysis(data_dir: Path, out_dir: Path, config: AnalysisConfig) -> dict:
             warnings=warnings, dependencies={name: version(name) for name in
                 ("networkx", "numpy", "scipy", "pyarrow", "pydantic", "fastapi")}, python=platform.python_version())
         checkpoint = perf_counter()
+        stage_changed("diagnostics")
         review, sensitivity = ranking_review(ranked, config)
         (stage / "ranking_review.md").write_text(review, encoding="utf-8")
         write_json(stage / "ranking_sensitivity.json", sensitivity)
@@ -177,6 +218,7 @@ def run_analysis(data_dir: Path, out_dir: Path, config: AnalysisConfig) -> dict:
         write_json(stage / "role_diagnostics.json", dict(distributions=distributions, intersections=overlaps))
         report["stages_seconds"]["diagnostics"] = perf_counter() - checkpoint
         checkpoint = perf_counter()
+        stage_changed("exports")
         write_csvs(stage, ranked, cluster_rows, top_n)
         write_json(stage / "config.json", config.model_dump())
         write_json(stage / "analysis.json", dict(nodes=ranked, clusters=cluster_rows,
@@ -185,7 +227,9 @@ def run_analysis(data_dir: Path, out_dir: Path, config: AnalysisConfig) -> dict:
         report["stages_seconds"]["exports"] = perf_counter() - checkpoint
         report.update(status="completed", total_seconds=perf_counter() - start)
         write_json(stage / "run_report.json", report)
+        stage_changed("publishing")
         stage.rename(destination)
+        published = True
         # Stable file links follow one atomically replaced latest pointer.
         for name in CSV_FIELDS:
             target = out_dir / name
@@ -205,8 +249,8 @@ def run_analysis(data_dir: Path, out_dir: Path, config: AnalysisConfig) -> dict:
         write_json(failed / (run_id + ".json"), report)
         if stage.exists():
             shutil.rmtree(stage)
-        if destination.exists() and (out_dir / "latest").resolve() != destination:
+        if published and destination.exists() and (out_dir / "latest").resolve() != destination:
             shutil.rmtree(destination)
         raise
     finally:
-        lock.rmdir()
+        release_run(out_dir, run_id)
