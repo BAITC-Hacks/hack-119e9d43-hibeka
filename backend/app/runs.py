@@ -20,6 +20,7 @@ from backend.app.analytics.pipeline import CSV_FIELDS, release_run, reserve_run,
 from backend.app.analytics.scoring import ROLES
 from backend.app.data import DATA_DIR
 from backend.app.jobs import read_state, supervise_job, write_state
+from backend.app.local_graph import LocalGraph, build_local_graph
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 MAX_UPLOAD_BYTES = 128 * 1024 * 1024
@@ -169,6 +170,16 @@ def run_node(run_id: str, gid: str):
 @router.get("/{run_id}/clusters")
 def run_clusters(run_id: str):
     return dict(run_id=run_id, items=read_analysis(snapshot(run_id))["clusters"])
+
+
+@router.get("/{run_id}/graph", response_model=LocalGraph)
+def run_graph(run_id: str, gid: str = Query(..., min_length=1),
+              hops: int = Query(1, ge=1, le=1), limit: int = Query(150, ge=1, le=150)):
+    data = read_analysis(snapshot(run_id))
+    try:
+        return build_local_graph(data, run_id, gid, limit)
+    except KeyError as exc:
+        raise api_error(404, "node_not_found", "Клиент не найден", gid=gid) from exc
 
 
 @router.get("/{run_id}/exports/{filename}")

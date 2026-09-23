@@ -10,6 +10,7 @@ import unittest
 from backend.app.analytics.config import AnalysisConfig
 from backend.app.analytics.pipeline import CSV_FIELDS, checksum, run_analysis
 from backend.app.data import DATA_DIR, load_dataset
+from backend.app.local_graph import build_local_graph
 
 
 class DatasetAcceptanceTests(unittest.TestCase):
@@ -134,6 +135,34 @@ class DatasetAcceptanceTests(unittest.TestCase):
         for v in review['variants']:
             self.assertAlmostEqual(sum(v['weights'].values()), 1)
             self.assertTrue(0 <= v['overlap'] <= 1)
+
+    def test_local_graph_for_every_client_matches_original_edges(self):
+        source_edges = self.data.tables['edges.parquet'].to_pylist()
+        neighbours = {r['gid']: set() for r in self.rows}
+        pairs = {}
+        for e in source_edges:
+            src, dst = str(e['src']), str(e['dst'])
+            neighbours[src].add(dst)
+            neighbours[dst].add(src)
+            pairs[(src, dst)] = e
+        before = self.second['csv_sha256']
+        by_gid = {r['gid']: r for r in self.rows}
+        for r in self.rows:
+            gid = r['gid']
+            expected_order = sorted(neighbours[gid] - {gid},
+                                    key=lambda g: (-round(by_gid[g]['priority_score'], 12), int(g)))
+            expected_ids = [gid, *expected_order[:149]]
+            result = build_local_graph(self.analysis, self.second['run_id'], gid)
+            self.assertEqual([n.id for n in result.nodes], expected_ids)
+            self.assertEqual(result.total_nodes, len(neighbours[gid] | {gid}))
+            self.assertEqual(result.truncated, result.total_nodes > len(expected_ids))
+            visible = set(expected_ids)
+            expected_pairs = {pair for pair in pairs if pair[0] in visible and pair[1] in visible}
+            self.assertEqual({(e.source, e.target) for e in result.edges}, expected_pairs)
+            for edge in result.edges:
+                source = pairs[(edge.source, edge.target)]
+                self.assertEqual((edge.sum_kzt, edge.n_tx), (source['sum_kzt'], source['n_tx']))
+        self.assertEqual(before, {name: checksum(self.out / name) for name in CSV_FIELDS})
 
 
 if __name__ == '__main__':

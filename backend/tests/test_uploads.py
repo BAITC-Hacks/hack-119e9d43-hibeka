@@ -274,6 +274,7 @@ class UploadHTTPTests(unittest.TestCase):
         self.assertEqual(self.get_json('/api/health')[0], 200)
         self.assertLess(monotonic() - started, 1)
         self.assertEqual(self.get_json('/api/runs/' + run_id + '/nodes')[0], 409)
+        self.assertEqual(self.get_json('/api/runs/' + run_id + '/graph?gid=1')[0], 409)
         status, rejected = self.upload()
         self.assertEqual(status, 409)
         self.assertEqual(rejected['detail']['code'], 'analysis_busy')
@@ -319,6 +320,36 @@ class UploadHTTPTests(unittest.TestCase):
         self.assertEqual(self.get_json('/api/runs/' + uuid4().hex)[0], 404)
         self.assertEqual(self.get_json('/api/runs/not-a-run')[0], 404)
         self.assertEqual(self.get_json('/api/runs/' + uuid4().hex + '/exports/config.json')[0], 404)
+
+    def test_local_graph_http_contract_limits_errors_and_complete_card(self):
+        status, accepted = self.upload()
+        self.assertEqual(status, 202)
+        run_id = accepted['run_id']
+        self.assertEqual(self.wait_for_job(run_id)[0]['status'], 'completed')
+        analysis = json.loads((self.out / 'runs' / run_id / 'analysis.json').read_text())
+        client = analysis['nodes'][0]
+        gid = client['gid']
+        prefix = '/api/runs/' + run_id
+        status, full = self.get_json(prefix + '/graph?gid=' + gid)
+        self.assertEqual(status, 200)
+        self.assertEqual((full['run_id'], full['gid'], full['hops'], full['limit']), (run_id, gid, 1, 150))
+        _, card_before = self.get_json(prefix + '/nodes/' + gid)
+        status, limited = self.get_json(prefix + '/graph?gid=' + gid + '&limit=1')
+        self.assertEqual(status, 200)
+        self.assertEqual(limited['shown_nodes'], 1)
+        self.assertTrue(limited['truncated'])
+        self.assertEqual(limited['edges'], [])
+        self.assertEqual(card_before, self.get_json(prefix + '/nodes/' + gid)[1])
+        self.assertGreater(len(card_before['incoming']) + len(card_before['outgoing']), 0)
+        for query in ('', '?gid=', '?gid=' + gid + '&limit=0', '?gid=' + gid + '&limit=151',
+                      '?gid=' + gid + '&limit=abc', '?gid=' + gid + '&hops=0', '?gid=' + gid + '&hops=2'):
+            self.assertEqual(self.get_json(prefix + '/graph' + query)[0], 422)
+        self.assertEqual(self.get_json(prefix + '/graph?gid=1')[0], 404)
+        self.assertEqual(self.get_json('/api/runs/' + uuid4().hex + '/graph?gid=' + gid)[0], 404)
+        isolate = next(r['gid'] for r in analysis['nodes'] if r['is_isolated'])
+        status, isolated = self.get_json(prefix + '/graph?gid=' + isolate)
+        self.assertEqual(status, 200)
+        self.assertEqual((isolated['shown_nodes'], isolated['total_nodes'], isolated['edges'], isolated['truncated']), (1, 1, [], False))
 
 
 if __name__ == '__main__':
