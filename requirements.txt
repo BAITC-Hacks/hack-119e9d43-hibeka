@@ -5,3 +5,5 @@ networkx==3.7
 numpy==2.5.3
 scipy==1.18.1
 python-multipart==0.0.32
+openai==3.19.0
+python-dotenv==1.2.3

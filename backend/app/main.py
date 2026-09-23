@@ -7,9 +7,11 @@ from backend.app.analytics.graph import GraphSummary, load_graph_summary
 from backend.app.analytics.metrics import CentralityError, ClientMetricsPage, load_client_metrics
 from backend.app.data import DataSummary, DatasetError, load_summary
 from backend.app.runs import router as runs_router
+from backend.app.assistant import router as assistant_router
 
 app = FastAPI(title="Money Graph API", version="0.1.0")
 app.include_router(runs_router)
+app.include_router(assistant_router)
 
 
 @app.get("/api/health", tags=["health"])
