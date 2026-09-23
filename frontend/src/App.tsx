@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createApi } from './api';
 import { isMockScenario, type MockScenario } from './api/mock';
 import type { AnalyticsApi } from './types/api';
@@ -9,6 +9,7 @@ import { RunSummary } from './components/RunSummary';
 import { StatusPanel } from './components/StatusPanel';
 import { LoadingOverview } from './components/LoadingOverview';
 import { WorkspaceShell } from './components/WorkspaceShell';
+import { WorkspaceController } from './state/workspace';
 
 function OverviewScreen({
   api,
@@ -26,6 +27,12 @@ function OverviewScreen({
   revision: number;
 }) {
   const state = useOverview(api, revision);
+  const workspace = useMemo(() => new WorkspaceController(api), [api]);
+  useEffect(() => {
+    if (state.status === 'success') void workspace.open(state.data.run.run_id);
+    else workspace.dispose();
+  }, [state, workspace]);
+  useEffect(() => () => workspace.dispose(), [workspace]);
   return (
     <>
       <PreviewControls
@@ -68,22 +75,20 @@ function OverviewScreen({
           />
         )}
         <WorkspaceShell
-          nodes={state.status === 'success' ? state.data.nodes : undefined}
-          loading={state.status === 'loading'}
+          controller={workspace}
+          disabled={state.status !== 'success'}
+          runId={state.status === 'success' ? state.data.run.run_id : null}
         />
         <div className="next-stage-note">
           <span>Дальше</span>
-          <p>
-            Очередь и карточка клиента → интерактивный граф → подключение API,
-            загрузка и экспорт.
-          </p>
+          <p>Интерактивный граф → подключение API, загрузка и экспорт.</p>
         </div>
       </main>
       <footer className="app-footer">
         <span>
           HIBEKA <span aria-hidden="true">/</span> HackAlem AI
         </span>
-        <span>Этап 1 · Контракт и каркас интерфейса</span>
+        <span>Этап 2 · Очередь и карточка клиента</span>
       </footer>
     </>
   );

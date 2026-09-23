@@ -140,7 +140,7 @@ export interface ClusterResponse {
   items: Cluster[];
 }
 
-/** Only the reads needed for stage one are implemented. */
+/** Read contracts used by stages one and two. */
 export interface AnalyticsApi {
   listRuns(signal: AbortSignal): Promise<Run[]>;
   listNodes(
@@ -148,4 +148,6 @@ export interface AnalyticsApi {
     query: NodeQuery,
     signal: AbortSignal,
   ): Promise<NodePage>;
+  getNode(runId: RunId, gid: Gid, signal: AbortSignal): Promise<ClientDetails>;
+  listClusters(runId: RunId, signal: AbortSignal): Promise<ClusterResponse>;
 }

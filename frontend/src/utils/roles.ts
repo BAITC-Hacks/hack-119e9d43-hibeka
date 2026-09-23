@@ -8,3 +8,7 @@ export const roleLabels: Record<Role, string> = {
   coordinator: 'Связующий узел',
   peripheral: 'Недостаточно признаков',
 };
+
+export function isRole(value: string): value is Role {
+  return Object.hasOwn(roleLabels, value);
+}

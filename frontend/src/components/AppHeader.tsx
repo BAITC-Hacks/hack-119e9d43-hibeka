@@ -14,7 +14,7 @@ export function AppHeader() {
       </div>
       <div className="header-actions" aria-describedby="header-actions-note">
         <span className="stage-badge">
-          Этап 01 <span>/ Каркас</span>
+          Этап 02 <span>/ Клиенты</span>
         </span>
         <button className="button" disabled>
           <Icon name="download" />

@@ -6,12 +6,14 @@ export function createApi(mode: string, scenario: MockScenario): AnalyticsApi {
   if (mode !== 'mock') {
     const unavailable = (): never => {
       throw new Error(
-        'Подключение аналитического API ещё не реализовано. Для каркаса первого этапа установите VITE_API_MODE=mock.',
+        'Подключение аналитического API ещё не реализовано. Для просмотра интерфейса установите VITE_API_MODE=mock.',
       );
     };
     return {
       listRuns: async () => unavailable(),
       listNodes: async () => unavailable(),
+      getNode: async () => unavailable(),
+      listClusters: async () => unavailable(),
     };
   }
   return createMockApi(scenario);
