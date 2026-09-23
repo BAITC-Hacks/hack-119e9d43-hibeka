@@ -1,5 +1,6 @@
-"""Read a summary of the local hackathon dataset."""
+"""Load and validate the local hackathon dataset."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -7,9 +8,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pydantic import BaseModel, Field
 
-from backend.app.validation import DatasetError, SCHEMAS, validate_tables
+from backend.app.validation import DatasetError, SCHEMAS, ValidationResult, validate_tables
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+
+
+@dataclass(frozen=True)
+class ValidatedDataset:
+    tables: dict[str, pa.Table]
+    validation: ValidationResult
 
 
 class ValidationInfo(BaseModel):
@@ -25,7 +32,7 @@ class DataSummary(BaseModel):
     validation: ValidationInfo
 
 
-def load_summary(data_dir: Path = DATA_DIR) -> DataSummary:
+def load_dataset(data_dir: Path = DATA_DIR) -> ValidatedDataset:
     tables = {}
     for filename in SCHEMAS:
         path = data_dir / filename
@@ -40,7 +47,13 @@ def load_summary(data_dir: Path = DATA_DIR) -> DataSummary:
             ) from exc
 
     result = validate_tables(tables)
+    return ValidatedDataset(tables=tables, validation=result)
 
+
+def load_summary(data_dir: Path = DATA_DIR) -> DataSummary:
+    dataset = load_dataset(data_dir)
+    tables = dataset.tables
+    result = dataset.validation
     return DataSummary(
         nodes_count=tables["nodes.parquet"].num_rows,
         edges_count=tables["edges.parquet"].num_rows,
